@@ -1,0 +1,102 @@
+import sys
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QObject, QEvent
+from PyQt6.QtGui import QTransform
+from PyQt6.QtWidgets import QApplication, QGraphicsView, QGraphicsScene, QMainWindow
+from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtSvgWidgets import QGraphicsSvgItem
+
+
+class GraphicsClickFilter(QObject):
+    clicked = pyqtSignal(object)   # emits the item that was clicked
+
+    def __init__(self, target_item, parent=None):
+        super().__init__(parent)
+        self.target_item = target_item
+
+    def eventFilter(self, watched, event):
+        # This filter is installed on the SCENE, so 'watched' is a QGraphicsScene
+        if event.type() == QEvent.Type.GraphicsSceneMousePress and event.button() == Qt.MouseButton.LeftButton:
+            # Which item is under the mouse?
+            item = watched.itemAt(event.scenePos(), QTransform())
+            if item is self.target_item:
+                self.clicked.emit(self.target_item)
+        return False  # allow normal handling to continue
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        screen_size = self.screen().availableGeometry()
+        self.screen_height = screen_size.height() - 28
+
+        scene = QGraphicsScene()
+        view = QGraphicsView(scene)
+
+        # background SVG
+        path = "SVGs/Full_Schematic.svg"
+        bg_rend = QSvgRenderer(path)
+        bg_item = QGraphicsSvgItem()
+        bg_item.setSharedRenderer(bg_rend)
+
+        s_h = bg_item.boundingRect().height()
+        scaling = self.screen_height / s_h
+        bg_item.setScale(scaling)
+        scene.addItem(bg_item)
+        self.setCentralWidget(view)
+
+        # valve SVG
+        valve_path = "SVGs/ball_valve.svg"
+        self.valve_item = QGraphicsSvgItem(valve_path)
+        v_h = self.valve_item.boundingRect().height()
+        valve_size_pix = 250
+        scaling_valve = valve_size_pix / v_h
+        self.valve_item.setScale(scaling_valve)
+        self.valve_item.setElementId("OPEN")
+        self.valve_val = True
+        scene.addItem(self.valve_item)
+
+        # position valve on anchor
+        anchor_rect = bg_rend.boundsOnElement("anchor")
+        vbox_h = bg_rend.viewBoxF().height()
+        svg_screen_scale = self.screen_height / vbox_h
+        anchor_pos = bg_item.mapToScene(anchor_rect.center())
+        anchor_pos = svg_screen_scale * (anchor_pos / scaling)
+
+        # size in scene coords for centering
+        item_scene_rect = self.valve_item.mapRectToScene(self.valve_item.boundingRect())
+        self.valve_item.setPos(
+            anchor_pos.x() - 0.5 * item_scene_rect.width(),
+            anchor_pos.y() - 0.5 * item_scene_rect.height()
+        )
+
+        # Click handling (install QObject filter on the SCENE, not the item)
+        self.click_filter = GraphicsClickFilter(self.valve_item, self)
+        scene.installEventFilter(self.click_filter)
+        self.click_filter.clicked.connect(self.toggle_valve)
+
+        self.initUI()
+
+    def initUI(self):
+        screen_size = self.screen().availableGeometry()
+        self.setFixedSize(screen_size.width(), screen_size.height() - 28)
+        qr = self.frameGeometry()
+        cp = self.screen().availableGeometry().center()
+        qr.moveCenter(cp)
+        self.move(qr.topLeft())
+
+    def toggle_valve(self, item):
+        if item.elementId() == "OPEN":
+            item.setElementId("CLOSED")
+        else:
+            item.setElementId("OPEN")
+
+
+def main():
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    app.exec()
+
+
+if __name__ == "__main__":
+    main()
